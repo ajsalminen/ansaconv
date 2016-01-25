@@ -18,7 +18,7 @@ You could download a copy of the [Sixteen Colors ANSI and ASCII Artwork
 Archive](http://sixteencolors.net/) from their
 [artpack repository](https://github.com/sixteencolors/sixteencolors-archive) and
 add something like this to your shell startup files:
-   ansaconv  ~/sixteencolors/$(shuf -n 1 ~/sixteencolors/list.txt)
+    ansaconv  ~/sixteencolors/$(shuf -n 1 ~/sixteencolors/list.txt)
 
 License
 -------
