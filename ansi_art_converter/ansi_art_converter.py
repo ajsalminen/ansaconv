@@ -6,23 +6,44 @@ import sys
 import time
 import logging
 import io
+import argparse
+import os
+import select
 
 def main():
     logger = logging.getLogger(__name__)
     fh = logging.FileHandler('ansi_art_converter.log')
     logger.addHandler(fh)
 
-    logger.warn("parsing file: {}".format(sys.argv[1]))
-    converter = AnsiArtConverter()
+
+    parser = argparse.ArgumentParser(description='Convert ANSI art for display.')
+    parser.add_argument('infile', nargs='?', type=argparse.FileType('r'),
+                        default=sys.stdin, help='the file that will be converted.')
+    parser.add_argument('outfile', nargs='?', type=argparse.FileType('w'),
+                        default=sys.stdout, help='optional file to write in.')
+
+
+    args = parser.parse_args()
+
+    if not select.select([args.infile,],[],[],0.0)[0]:
+        sys.stderr.write("Error: No input data.")
+        return os.EX_DATAERR
+
+    logger.warn("converting from: {}".format(args.infile.name))
+    converter = AnsiArtConverter(args.infile, args.outfile)
     converter.print_ansi()
 
 
 class DelayedPrinter(object):
     """Delay the printing to make it match the original display."""
 
+    def __init__(self, output=sys.stdout):
+        """Set the requested output destination for the instance."""
+        self._output = output
+
     def write(self, string):
         """Write a string to the screen."""
-        sys.stdout.write(string)
+        self._output.write(string)
 
 
 class TerminalScreen(object):
@@ -211,9 +232,11 @@ class AnsiArtConverter(object):
         'm': 'color' }
 
     screen = TerminalScreen()
-    source_ansi = open(sys.argv[1],'rb')
-    output = DelayedPrinter()
 
+    def __init__(self, source_ansi, output):
+        """Sets the source and destination for the conversion."""
+        self._source_ansi = source_ansi
+        self._output = DelayedPrinter(output)
 
 
     def process(self, chars, stream):
@@ -242,16 +265,16 @@ class AnsiArtConverter(object):
 
     def print_ansi(self):
         """Controls the printing of the ANSI art."""
-        self.output.write(self.prepare_screen())
+        self._output.write(self.prepare_screen())
         while True:
-            character = self.source_ansi.read(1)
+            character = self._source_ansi.read(1)
             if not character:
                 break
             # DOS EOF, after it comes SAUCE metadata.
             if character == '\x1a':
                 break
-            self.output.write(self.process(character, self.source_ansi))
-        self.output.write(self.close_screen())
+            self._output.write(self.process(character, self._source_ansi))
+        self._output.write(self.close_screen())
 
     def read_csi_sequence(self, chars, stream):
         """Reads a CSI escape sequence and calls the method that handles it."""
