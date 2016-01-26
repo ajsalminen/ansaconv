@@ -123,13 +123,16 @@ class TerminalScreen(object):
 
     def position(self, pos):
         """Changes the tracked cursor position to requested."""
-        if pos[0] == '':
-            pos[0] = '1'
 
-        if 1 in pos and pos[1] == '':
-            pos[1] = '1'
+        # Omitted positions default to 1.
+        if pos[0] == '':
+            pos[0] = 1
+
+        if len(pos) == 2:
+            if pos[1] == '':
+                pos[1] = 1
         else:
-            pos.append('1')
+            pos.append(1)
 
         self.cursor['row'] = pos[0]
         self.cursor['col'] = pos[1]
@@ -302,6 +305,7 @@ class AnsiArtConverter(object):
         """Gather the CSI escape sequence parameters in a list."""
         parameters = []
         for parameter in sequence.split(';'):
+            # Other possibilities are a letter and the empty string.
             if parameter.isdigit():
                 parameter = int(parameter)
             parameters.append(parameter)
