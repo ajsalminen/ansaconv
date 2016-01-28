@@ -9,6 +9,8 @@ import io
 import argparse
 import os
 import select
+import tty
+
 
 def main():
     logger = logging.getLogger(__name__)
@@ -45,13 +47,9 @@ class DelayedPrinter(object):
         """Write a string to the screen."""
         self._output.write(string)
 
-
 class TerminalScreen(object):
 
-
     logger = logging.getLogger(__name__)
-    cursor = {'row': 1, 'col': 1}
-    saved_cursor = {'row': 1, 'col': 1}
     auto_newline = False
     max_row = 1
     default_color = {
@@ -60,6 +58,20 @@ class TerminalScreen(object):
     current_color =  {
         'flags': {}
     }
+
+    def __init__(self, origin = {'row': 1, 'col': 1}, dimensions = {'cols': 80}):
+        """Set the screen parameters."""
+        self.origin = origin
+        self.cursor = copy.deepcopy(origin)
+        self.saved_cursor = copy.deepcopy(origin)
+        self.bounds = {}
+        self.bounds['col'] = origin['col'] + dimensions['cols'] - 1
+
+        if 'rows' in dimensions:
+            self.bounds['row'] = origin['row'] + dimensions['rows'] - 1
+
+
+
 
     def current_color_debug(self):
         """Returns the current color settings as a readable string."""
@@ -78,24 +90,26 @@ class TerminalScreen(object):
         if self.cursor['row'] > self.max_row:
             self.max_row = self.cursor['row']
 
+        # Ignore a newline if it was already added because of width limit.
         if self.auto_newline and char != "\r":
             self.auto_newline = False
             if char == "\n":
                 return ""
 
         if char == "\n":
-                self.cursor['row'] += 1
-                self.cursor['col'] = 1
-                return self.newline()
+            self.cursor['row'] += 1
+            self.cursor['col'] = copy.deepcopy(self.origin['col'])
+            return self.newline()
         elif char == '\r': #  or char == '\0':
-        # Don't count the CR
+            self.cursor['col'] = copy.deepcopy(self.origin['col'])
+            # Don't count the CR
             return char
         else:
             self.cursor['col']+=1
 
-            if self.cursor['col'] == 81:
+            if self.cursor['col'] > self.bounds['col']:
                 self.cursor['row'] += 1
-                self.cursor['col'] = 1
+                self.cursor['col'] = copy.deepcopy(self.origin['col'])
                 self.auto_newline = True
                 return char + self.newline()
         return char
@@ -111,14 +125,14 @@ class TerminalScreen(object):
     def forward(self, cols):
         """Changes the tracked cursor position one column forward."""
         self.cursor['col'] += cols[0]
-        if self.cursor['col'] > 80:
-            self.cursor['col'] = 80
+        if self.cursor['col'] > self.bounds['col']:
+            self.cursor['col'] = copy.deepcopy(self.bounds['col'])
 
     def back(self, cols):
         """Changes the tracked cursor position one column back."""
         self.cursor['col'] -= cols[0]
-        if self.cursor['col'] < 1:
-            self.cursor['col'] = 1
+        if self.cursor['col'] < self.origin['col']:
+            self.cursor['col'] = copy.deepcopy(self.origin['col'])
 
 
     def position(self, pos):
@@ -126,23 +140,23 @@ class TerminalScreen(object):
 
         # Omitted positions default to 1.
         if pos[0] == '':
-            pos[0] = 1
+            pos[0] = copy.deepcopy(self.origin['row'])
 
         if len(pos) == 2:
             if pos[1] == '':
-                pos[1] = 1
+                pos[1] = copy.deepcopy(self.origin['col'])
         else:
-            pos.append(1)
+            pos.append(copy.deepcopy(self.origin['col']))
 
-        self.cursor['row'] = pos[0]
-        self.cursor['col'] = pos[1]
+        self.cursor['row'] = self.origin['row'] + pos[0] - 1
+        self.cursor['col'] = self.origin['col'] + pos[1] - 1
 
     # TODO replace with decrc/decsc for better compatibility with terminals?
-    def save_cursor(self, arg):
+    def save_cursor(self, arg = []):
         """Saves the tracked cursor position."""
         self.saved_cursor = copy.deepcopy(self.cursor)
 
-    def restore_cursor(self, arg):
+    def restore_cursor(self, arg = []):
         """Restores the tracked cursor position."""
         self.cursor = copy.deepcopy(self.saved_cursor)
 
@@ -215,7 +229,63 @@ class TerminalScreen(object):
         This ensures the background color won't run to end of line."""
         default_color = self.get_csi_sequence_for_color(self.default_color)
         current_color = self.get_csi_sequence_for_color(self.current_color)
-        return default_color + "\n" + current_color
+
+        newline = "\n"
+        if self.origin['col'] > 1:
+            newline += "\033[{}C".format(self.origin['col'] - 1)
+
+
+        return default_color + newline + current_color
+
+    def backspace(self):
+        """Delete previous character and go back."""
+        self.cursor['col'] -= 1
+
+        if self.cursor['col'] < self.origin['col']:
+            self.cursor['col'] = copy.deepcopy(self.bounds['col'])
+
+            if self.cursor['row'] > self.bounds['row']:
+                self.cursor['row'] -= 1
+
+class PositionReporter:
+    """Check that terminal reports same cursor position as our tracking."""
+
+
+    logger = logging.getLogger(__name__)
+
+    def __init__(self, screen, input = sys.stdin):
+        self.screen = screen
+        self.input = input
+
+    def get_position_report(self):
+            # Ask for the position, do not print a newline.
+            print "\033[6n",
+            char = ''
+            cursor = ''
+            sequence = []
+            while True:
+                # Look for and read the position report.
+                report_chars = self.input.read(1)
+                if report_chars[0] == "\033":
+                    report_chars += self.input.read(1)
+                    if report_chars[1] != '[':
+                        continue
+                    # self.logger.warn("Reporting: " + report_chars)
+                    sequence = self.screen.read_escape_sequence(report_chars, self.input)
+                    if not sequence:
+                        continue
+                    break
+                    # if not sequence:
+                        # continue
+                else:
+                    self.logger.warn("Unexpected: {}")
+            if sequence:
+                command_char, parameters, chars = sequence
+            position = { 'row': parameters[0] }
+            position['col'] = parameters[1]
+
+            return position
+
 
 
 class AnsiArtConverter(object):
@@ -232,15 +302,36 @@ class AnsiArtConverter(object):
         'K': 'erase_line',
         's': 'save_cursor',
         'u': 'restore_cursor',
-        'm': 'color' }
+        'm': 'color',
+        'R': 'report_cursor_position'
+    }
 
-    screen = TerminalScreen()
+    command_blacklist = set(
+        [
+            # Setting wraparound mode does not work in rxvt and is the default.
+            # SM and DECSET commands should not be present in ANSI art and
+            # ANSI.SYS screen modes are not supported.
+            'h',
+            # In DOS resets screen modes and the real ANSI codes are not useful.
+            'l'
+        ]
+    )
 
+    # Currently these are passed to and handled in printable_character.
+    # Most control characters don't affect cursor position so just pass them.
+    printable_control_chars = set(
+        [
+            10, # LF (\n)
+            13 # CR (\r)
+        ]
+    )
+
+    screen = TerminalScreen({'row': 1, 'col': 1})
     def __init__(self, source_ansi, output):
         """Sets the source and destination for the conversion."""
         self._source_ansi = source_ansi
         self._output = DelayedPrinter(output)
-
+        self.position_reporter = PositionReporter(self)
 
     def process(self, chars, stream):
         """Processes characters that are part of the ANSI art."""
@@ -252,10 +343,19 @@ class AnsiArtConverter(object):
             if 0 <= char_pos <= 31 or char_pos == 127:
                 # Nonprintable control characters.
                 self.logger.warn("ASCII control code: {}".format(hex(char_pos)))
+                if char_pos not in self.printable_control_chars:
+                    # del, horizontal tab, vertical tab (others?) not handled.
+                    if char_pos == 8:
+                        self.screen.backspace()
+                    return chars
             chars = self.screen.printable_character(chars)
             chars = chars.decode('cp437').encode('utf-8')
-            self.logger.warn("row: {} col: {}".format(self.screen.cursor['row'],
-                                                 self.screen.cursor['col']))
+        self.logger.warn("row: {} col: {}".format(self.screen.cursor['row'],
+                                                  self.screen.cursor['col']))
+        col = self.screen.cursor['col']
+        if self.screen.cursor['col'] >= 54:
+            col = 54
+        # return "\033[{};{}f".format(self.screen.cursor['row'], col) + chars
         return chars
 
     def process_escape_code(self, chars, stream):
@@ -269,6 +369,8 @@ class AnsiArtConverter(object):
     def print_ansi(self):
         """Controls the printing of the ANSI art."""
         self._output.write(self.prepare_screen())
+
+        tty.setcbreak(sys.stdin.fileno())
         while True:
             character = self._source_ansi.read(1)
             if not character:
@@ -277,9 +379,34 @@ class AnsiArtConverter(object):
             if character == '\x1a':
                 break
             self._output.write(self.process(character, self._source_ansi))
+
+            position = self.position_reporter.get_position_report()
+            # this is bugged after processing newlines.
+            if  position['col'] != self.screen.cursor['col']:
+                message = "wrong pos ({}, {}), processed to {}, actual row: {} "
+                + "col: {}"
+                row = self.screen.cursor['row']
+                col = self.screen.cursor['col']
+                offset = self._source_ansi.tell()
+                rrow = position['row']
+                rcol = position['col']
+                self.logger.warn(message.format(row, col, offset, rrow, rcol))
         self._output.write(self.close_screen())
 
     def read_csi_sequence(self, chars, stream):
+        sequence = self.read_escape_sequence(chars, stream)
+        if sequence:
+            command_char, parameters, chars = sequence
+
+            if command_char in self.command_blacklist:
+                message = "ignored blacklisted command: {}"
+                self.logger.warn(message.format(command_char))
+                return ''
+
+            getattr(self.screen, self.commands[command_char])(parameters)
+        return chars
+
+    def read_escape_sequence(self, chars, stream):
         """Reads a CSI escape sequence and calls the method that handles it."""
         sequence = ''
         while True:
@@ -292,14 +419,17 @@ class AnsiArtConverter(object):
                         sequence = '1'
                     self.logger.warn(self.commands[character] + " " + sequence)
                     parameters = self._get_csi_parameters(sequence)
-                    getattr(self.screen, self.commands[character])(parameters)
+                    return [character, parameters, chars]
                     self.logger.warn(self.screen.current_color_debug())
+                elif character in self.command_blacklist:
+                    return [character, [], []]
                 else:
-                    self.logger.warn("Unhandled escape code: {}".format(character))
+                    message = "Unhandled escape code: {}"
+                    self.logger.warn(message.format(character))
                 break
             else:
                 sequence += character
-        return chars
+        return None
 
     def _get_csi_parameters(self, sequence):
         """Gather the CSI escape sequence parameters in a list."""
@@ -316,7 +446,9 @@ class AnsiArtConverter(object):
         """Prepares the screen for printing ANSI art."""
         # Erase screen and move cursor to top left.
         output =  "\033[2J"
-        output += "\033[1;1f"
+        origin_row = self.screen.origin['row']
+        origin_col = self.screen.origin['col']
+        output += "\033[{};{}f".format(origin_row, origin_col)
         # Hide cursor.
         output += "\033[?25l"
         return output
