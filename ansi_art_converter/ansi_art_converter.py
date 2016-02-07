@@ -275,13 +275,10 @@ class PositionReporter:
                     report_chars += self.input.read(1)
                     if report_chars[1] != '[':
                         continue
-                    # self.logger.warn("Reporting: " + report_chars)
                     sequence = self.screen.read_escape_sequence(report_chars, self.input)
                     if not sequence:
                         continue
                     break
-                    # if not sequence:
-                        # continue
                 else:
                     self.logger.warn("Unexpected: {}")
             if sequence:
@@ -360,7 +357,6 @@ class AnsiArtConverter(object):
         col = self.screen.cursor['col']
         if self.screen.cursor['col'] >= 54:
             col = 54
-        # return "\033[{};{}f".format(self.screen.cursor['row'], col) + chars
         return chars
 
     def process_escape_code(self, chars, stream):
@@ -388,8 +384,8 @@ class AnsiArtConverter(object):
             position = self.position_reporter.get_position_report()
             # this is bugged after processing newlines.
             if  position['col'] != self.screen.cursor['col']:
-                message = "wrong pos ({}, {}), processed to {}, actual row: {} "
-                + "col: {}"
+                message = ("wrong pos ({}, {}), processed to {}, actual row: {} "
+                "col: {}")
                 row = self.screen.cursor['row']
                 col = self.screen.cursor['col']
                 offset = self._source_ansi.tell()
