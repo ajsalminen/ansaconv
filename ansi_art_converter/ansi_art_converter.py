@@ -23,6 +23,10 @@ def main():
                         default=sys.stdin, help='the file that will be converted.')
     parser.add_argument('outfile', nargs='?', type=argparse.FileType('w'),
                         default=sys.stdout, help='optional file to write in.')
+    parser.add_argument('-o', '--offset-column', type=int,
+                        default=1, help='Column offset to print the art at.')
+    parser.add_argument('-O', '--offset-row', type=int,
+                        default=1, help='Column offset to print the art at.')
 
 
     args = parser.parse_args()
@@ -32,7 +36,8 @@ def main():
         return os.EX_DATAERR
 
     logger.warn("converting from: {}".format(args.infile.name))
-    converter = AnsiArtConverter(args.infile, args.outfile)
+    screen = TerminalScreen({'row': args.offset_row, 'col': args.offset_column})
+    converter = AnsiArtConverter(args.infile, args.outfile, screen)
     converter.print_ansi()
 
 
@@ -326,12 +331,12 @@ class AnsiArtConverter(object):
         ]
     )
 
-    screen = TerminalScreen({'row': 1, 'col': 1})
-    def __init__(self, source_ansi, output):
+    def __init__(self, source_ansi, output, screen):
         """Sets the source and destination for the conversion."""
         self._source_ansi = source_ansi
         self._output = DelayedPrinter(output)
         self.position_reporter = PositionReporter(self)
+        self.screen = screen
 
     def process(self, chars, stream):
         """Processes characters that are part of the ANSI art."""
