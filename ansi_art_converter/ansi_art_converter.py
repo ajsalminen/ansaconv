@@ -26,7 +26,7 @@ def main():
     parser.add_argument('-o', '--offset-column', type=int,
                         default=1, help='Column offset to print the art at.')
     parser.add_argument('-O', '--offset-row', type=int,
-                        default=1, help='Column offset to print the art at.')
+                        default=1, help='Row offset to print the art at.')
 
 
     args = parser.parse_args()
@@ -53,6 +53,7 @@ class DelayedPrinter(object):
         self._output.write(string)
 
 class TerminalScreen(object):
+    """Represents the terminal screen and it's state."""
 
     logger = logging.getLogger(__name__)
     auto_newline = False
@@ -259,39 +260,40 @@ class PositionReporter:
     logger = logging.getLogger(__name__)
 
     def __init__(self, screen, input = sys.stdin):
+        """Initialise the injected attributes for PositionReporter"""
         self.screen = screen
         self.input = input
 
     def get_position_report(self):
-            # Ask for the position, do not print a newline.
-            print "\033[6n",
-            char = ''
-            cursor = ''
-            sequence = []
-            while True:
-                # Look for and read the position report.
-                report_chars = self.input.read(1)
-                if report_chars[0] == "\033":
-                    report_chars += self.input.read(1)
-                    if report_chars[1] != '[':
-                        continue
-                    sequence = self.screen.read_escape_sequence(report_chars, self.input)
-                    if not sequence:
-                        continue
-                    break
-                else:
-                    self.logger.warn("Unexpected: {}")
-            if sequence:
-                command_char, parameters, chars = sequence
-            position = { 'row': parameters[0] }
-            position['col'] = parameters[1]
+        """Gets and parses the cursor position reported by the terminal."""
+        # Ask for the position, do not print a newline.
+        print "\033[6n",
+        char = ''
+        cursor = ''
+        sequence = []
+        while True:
+            # Look for and read the position report.
+            report_chars = self.input.read(1)
+            if report_chars[0] == "\033":
+                report_chars += self.input.read(1)
+                if report_chars[1] != '[':
+                    continue
+                sequence = self.screen.read_escape_sequence(report_chars, self.input)
+                if not sequence:
+                    continue
+                break
+            else:
+                self.logger.warn("Unexpected: {}")
+        if sequence:
+            command_char, parameters, chars = sequence
+        position = { 'row': parameters[0] }
+        position['col'] = parameters[1]
 
-            return position
-
+        return position
 
 
 class AnsiArtConverter(object):
-
+    """Interprets ANSI commands and transforms the output."""
     logger = logging.getLogger(__name__)
     commands = {
         'A': 'up',
@@ -395,6 +397,7 @@ class AnsiArtConverter(object):
         self._output.write(self.close_screen())
 
     def read_csi_sequence(self, chars, stream):
+        """Reads a CSI escape sequence and calls the appropriate command."""
         sequence = self.read_escape_sequence(chars, stream)
         if sequence:
             command_char, parameters, chars = sequence
