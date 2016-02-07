@@ -10,7 +10,7 @@ import argparse
 import os
 import select
 import tty
-
+import curses
 
 def main():
     logger = logging.getLogger(__name__)
@@ -52,6 +52,47 @@ class DelayedPrinter(object):
         """Write a string to the screen."""
         self._output.write(string)
 
+class TerminalCommands(object):
+
+    def color(self, args):
+        """Returns the CSI escape sequence for current color."""
+        return "\033[" + (';').join(map(str,args)) + 'm'
+
+    def forward(self, args = [1]):
+        return "\033[{}C".format(args[0])
+
+    def hide_cursor(self, args = []):
+        return "\033[?25l"
+
+    def show_cursor(self, args = []):
+        return "\033[?25h"
+
+    def erase_screen(self, args = []):
+        return "\033[2J"
+
+    def cursor_position(self, row, column):
+        return "\033[{};{}f".format(row, column)
+
+
+    def interpret_color(self, color):
+        components = []
+        for i in range(1, 7, 2):
+            components.append(int(int(color[i:i+2],16)/255.0*1000))
+        return components
+
+    def init_colors(self, colors):
+        curses.setupterm()
+        initc = curses.tigetstr("initc")
+        for index, color in enumerate(colors):
+            red, green, blue = self.interpret_color(color)
+            command = curses.tparm(initc, index, red, green, blue)
+            print command,
+
+
+
+
+
+
 class TerminalScreen(object):
     """Represents the terminal screen and it's state."""
 
@@ -64,6 +105,7 @@ class TerminalScreen(object):
     current_color =  {
         'flags': {}
     }
+    terminalcommands = TerminalCommands()
 
     def __init__(self, origin = {'row': 1, 'col': 1}, dimensions = {'cols': 80}):
         """Set the screen parameters."""
@@ -72,11 +114,8 @@ class TerminalScreen(object):
         self.saved_cursor = copy.deepcopy(origin)
         self.bounds = {}
         self.bounds['col'] = origin['col'] + dimensions['cols'] - 1
-
         if 'rows' in dimensions:
             self.bounds['row'] = origin['row'] + dimensions['rows'] - 1
-
-
 
 
     def current_color_debug(self):
@@ -208,8 +247,7 @@ class TerminalScreen(object):
 
         return current
 
-    def get_csi_sequence_for_color(self, color):
-        """Returns the CSI escape sequence for current color."""
+    def color_params(self, color):
         parameters = []
         flags = color['flags']
         for k in sorted(flags.keys()):
@@ -226,19 +264,21 @@ class TerminalScreen(object):
         # If there are no color settings, reset to defaults.
         if not parameters:
             parameters.append('0')
-
-        return "\033[" + (';').join(parameters) + 'm'
+        return parameters
 
     def newline(self):
         """Turn off colors when printing a newline.
 
         This ensures the background color won't run to end of line."""
-        default_color = self.get_csi_sequence_for_color(self.default_color)
-        current_color = self.get_csi_sequence_for_color(self.current_color)
+
+        default_color_params = self.color_params(self.default_color)
+        current_color_params = self.color_params(self.current_color)
+        default_color = self.terminalcommands.color(default_color_params)
+        current_color = self.terminalcommands.color(current_color_params)
 
         newline = "\n"
         if self.origin['col'] > 1:
-            newline += "\033[{}C".format(self.origin['col'] - 1)
+            newline += self.terminalcommands.forward().format(self.origin['col'] - 1)
 
 
         return default_color + newline + current_color
@@ -295,6 +335,7 @@ class PositionReporter:
 class AnsiArtConverter(object):
     """Interprets ANSI commands and transforms the output."""
     logger = logging.getLogger(__name__)
+    terminalcommands = TerminalCommands()
     commands = {
         'A': 'up',
         'B': 'down',
@@ -309,6 +350,26 @@ class AnsiArtConverter(object):
         'm': 'color',
         'R': 'report_cursor_position'
     }
+
+    vga_colors = [
+        '#000000',
+        '#aa0000',
+        '#00aa00',
+        '#aa5500',
+        '#0000aa',
+        '#aa00aa',
+        '#00aaaa',
+        '#aaaaaa',
+        '#555555',
+        '#ff5555',
+        '#55ff55',
+        '#ffff55',
+        '#5555ff',
+        '#ff55ff',
+        '#55ffff',
+        '#ffffff',
+    ]
+
 
     command_blacklist = set(
         [
@@ -407,7 +468,14 @@ class AnsiArtConverter(object):
                 self.logger.warn(message.format(command_char))
                 return ''
 
-            getattr(self.screen, self.commands[command_char])(parameters)
+            return self.command(command_char, parameters, chars)
+        return chars
+
+
+    def command(self, command_char, parameters, chars):
+        getattr(self.screen, self.commands[command_char])(parameters)
+        if hasattr(self.terminalcommands, self.commands[command_char]):
+            chars = getattr(self.terminalcommands, self.commands[command_char])(parameters)
         return chars
 
     def read_escape_sequence(self, chars, stream):
@@ -448,21 +516,24 @@ class AnsiArtConverter(object):
 
     def prepare_screen(self):
         """Prepares the screen for printing ANSI art."""
+
+        self.terminalcommands.init_colors(self.vga_colors)
+
         # Erase screen and move cursor to top left.
-        output =  "\033[2J"
+        output =  self.terminalcommands.erase_screen()
         origin_row = self.screen.origin['row']
         origin_col = self.screen.origin['col']
-        output += "\033[{};{}f".format(origin_row, origin_col)
-        # Hide cursor.
-        output += "\033[?25l"
+        output += self.terminalcommands.cursor_position(origin_row, origin_col)
+        output += self.terminalcommands.hide_cursor()
         return output
 
     def close_screen(self):
         """Return the screen to interactive state after printing."""
+
         # Place cursor at the end to not crop it.
-        output = "\033[{};1H".format(self.screen.max_row + 1)
+        output = self.terminalcommands.cursor_position(self.screen.max_row + 1, self.screen.cursor['col'])
         # show cursor
-        output += "\033[?25h"
+        output += self.terminalcommands.show_cursor()
         return output
 
 
