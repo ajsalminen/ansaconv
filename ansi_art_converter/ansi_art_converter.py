@@ -27,7 +27,8 @@ def main():
                         default=1, help='Column offset to print the art at.')
     parser.add_argument('-O', '--offset-row', type=int,
                         default=1, help='Row offset to print the art at.')
-
+    parser.add_argument('-p', '--palette-offset', type=int,
+                        default=64, help='Palette offset to use.')
 
     args = parser.parse_args()
 
@@ -36,8 +37,9 @@ def main():
         return os.EX_DATAERR
 
     logger.warn("converting from: {}".format(args.infile.name))
-    screen = TerminalScreen({'row': args.offset_row, 'col': args.offset_column})
-    converter = AnsiArtConverter(args.infile, args.outfile, screen)
+    image_writer = TerminalCommands(args.palette_offset)
+    screen = TerminalScreen(image_writer, {'row': args.offset_row, 'col': args.offset_column})
+    converter = AnsiArtConverter(args.infile, args.outfile, screen, image_writer, args.palette_offset)
     converter.print_ansi()
 
 
@@ -54,9 +56,47 @@ class DelayedPrinter(object):
 
 class TerminalCommands(object):
 
+    def __init__(self, palette_offset = 0):
+        self.palette_offset = palette_offset
+
     def color(self, args):
         """Returns the CSI escape sequence for current color."""
-        return "\033[" + (';').join(map(str,args)) + 'm'
+        bright = False
+        fg_found = False
+        for a in args:
+            if int(a) >= 30 and int(a) < 40:
+                fg_found = True
+        if args == ['1']:
+            return "\033[0;38;5;79m" # bold = white potential problem:
+        # if there is only bold command, need to act based on current color
+        # or do we always get the current color here also, I think we do.
+        elif '1' in args:
+            bright = True # todo: flag has to be tracked to know if it set...
+        # return "\033[" + (';').join(map(self.color_map, args, [])) + 'm'
+        # print [self.color_map(arg, bright) for arg in args]
+        logger = logging.getLogger(__name__)
+        converted_color = [self.color_map(arg, bright) for arg in args]
+
+        logger.warn("Converting colors {} to {}".format(",".join([str(a) for a in args]), ",".join([str(a) for a in converted_color])))
+        if bright and not fg_found:
+            return "\033[0;" + "38;5;79" + (';').join(converted_color) + 'm'
+
+        return "\033[0;" + (';').join(converted_color) + 'm'
+
+    def color_map(self, arg, bright = False):
+        # if isinstance(arg, int):
+            arg = int(arg)
+            if arg >= 40:
+                return "48;5;" + str(arg - 40 + self.palette_offset)
+            elif arg >= 30:
+                if bright:
+                    arg += 8
+                return "38;5;" + str(arg - 30 + self.palette_offset)
+            return str(arg)
+
+    def shift_palette(self, args):
+        """Shifts the palette colors according to the offset"""
+        return [parameter + self.palette_offset if isinstance(parameter, int) and parameter >= 30 else parameter for parameter in args]
 
     def forward(self, args = [1]):
         return "\033[{}C".format(args[0])
@@ -85,7 +125,7 @@ class TerminalCommands(object):
         initc = curses.tigetstr("initc")
         for index, color in enumerate(colors):
             red, green, blue = self.interpret_color(color)
-            command = curses.tparm(initc, index, red, green, blue)
+            command = curses.tparm(initc, self.palette_offset + index, red, green, blue)
             print command,
 
 
@@ -107,7 +147,7 @@ class TerminalScreen(object):
     }
     terminalcommands = TerminalCommands()
 
-    def __init__(self, origin = {'row': 1, 'col': 1}, dimensions = {'cols': 80}):
+    def __init__(self, image_writer, origin = {'row': 1, 'col': 1}, dimensions = {'cols': 80}):
         """Set the screen parameters."""
         self.origin = origin
         self.cursor = copy.deepcopy(origin)
@@ -116,6 +156,7 @@ class TerminalScreen(object):
         self.bounds['col'] = origin['col'] + dimensions['cols'] - 1
         if 'rows' in dimensions:
             self.bounds['row'] = origin['row'] + dimensions['rows'] - 1
+        self.image_writer = image_writer
 
 
     def current_color_debug(self):
@@ -219,6 +260,9 @@ class TerminalScreen(object):
         for parameter in arg:
             current = self.interpret_color(current, parameter)
         self.current_color = current
+        chars = self.image_writer.color(self.color_params(current))
+        return chars
+
 
     def interpret_color(self, current, parameter):
         """Interprets the CSI sequence parameters for color setting."""
@@ -244,7 +288,6 @@ class TerminalScreen(object):
                 if parameter == 5:
                     if 6 in current['flags']:
                         current['flags']['6'] = False
-
         return current
 
     def color_params(self, color):
@@ -252,14 +295,14 @@ class TerminalScreen(object):
         flags = color['flags']
         for k in sorted(flags.keys()):
             if flags[k]:
-                parameters.append(str(k))
+                parameters.append(k)
 
         if 'foreground' in color:
-            parameters.append(str(color['foreground']))
+            parameters.append(color['foreground'])
 
 
         if 'background' in color:
-            parameters.append(str(color['background']))
+            parameters.append(color['background'])
 
         # If there are no color settings, reset to defaults.
         if not parameters:
@@ -335,7 +378,6 @@ class PositionReporter:
 class AnsiArtConverter(object):
     """Interprets ANSI commands and transforms the output."""
     logger = logging.getLogger(__name__)
-    terminalcommands = TerminalCommands()
     commands = {
         'A': 'up',
         'B': 'down',
@@ -391,11 +433,12 @@ class AnsiArtConverter(object):
         ]
     )
 
-    def __init__(self, source_ansi, output, screen):
+    def __init__(self, source_ansi, output, screen, image_writer, palette_offset = 0):
         """Sets the source and destination for the conversion."""
         self._source_ansi = source_ansi
         self._output = DelayedPrinter(output)
         self.position_reporter = PositionReporter(self)
+        self.terminalcommands = image_writer
         self.screen = screen
 
     def process(self, chars, stream):
@@ -473,9 +516,11 @@ class AnsiArtConverter(object):
 
 
     def command(self, command_char, parameters, chars):
-        getattr(self.screen, self.commands[command_char])(parameters)
-        if hasattr(self.terminalcommands, self.commands[command_char]):
-            chars = getattr(self.terminalcommands, self.commands[command_char])(parameters)
+        replaced_parameters = getattr(self.screen, self.commands[command_char])(parameters)
+
+        if replaced_parameters:
+            # Screen needs to provide the complete color setting.
+            chars = replaced_parameters
         return chars
 
     def read_escape_sequence(self, chars, stream):
