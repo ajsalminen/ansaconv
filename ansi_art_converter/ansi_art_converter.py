@@ -55,44 +55,54 @@ class DelayedPrinter(object):
         self._output.write(string)
 
 class TerminalCommands(object):
-
+    """Writes output as ANSI escape codes."""
     def __init__(self, palette_offset = 0):
         self.palette_offset = palette_offset
 
     def color(self, args):
         """Returns the CSI escape sequence for current color."""
-        bright = False
-        fg_found = False
-        for a in args:
-            if int(a) >= 30 and int(a) < 40:
-                fg_found = True
-        if args == ['1']:
-            return "\033[0;38;5;79m" # bold = white potential problem:
-        # if there is only bold command, need to act based on current color
-        # or do we always get the current color here also, I think we do.
-        elif '1' in args:
-            bright = True # todo: flag has to be tracked to know if it set...
-        # return "\033[" + (';').join(map(self.color_map, args, [])) + 'm'
-        # print [self.color_map(arg, bright) for arg in args]
         logger = logging.getLogger(__name__)
-        converted_color = [self.color_map(arg, bright) for arg in args]
+        converted_color = self.color_map(args)
 
         logger.warn("Converting colors {} to {}".format(",".join([str(a) for a in args]), ",".join([str(a) for a in converted_color])))
-        if bright and not fg_found:
-            return "\033[0;" + "38;5;79" + (';').join(converted_color) + 'm'
-
         return "\033[0;" + (';').join(converted_color) + 'm'
 
-    def color_map(self, arg, bright = False):
-        # if isinstance(arg, int):
-            arg = int(arg)
-            if arg >= 40:
-                return "48;5;" + str(arg - 40 + self.palette_offset)
-            elif arg >= 30:
-                if bright:
-                    arg += 8
-                return "38;5;" + str(arg - 30 + self.palette_offset)
-            return str(arg)
+    def color_map(self, arg):
+            color = []
+            if 'background' in arg:
+                color.append("48;5;" + str(arg['background'] - 40 + self.palette_offset))
+            else:
+                color.append("48;5;64")
+            if 'foreground' in arg:
+                foreground_index = arg['foreground'] - 30 + self.palette_offset
+                if '1' in arg['flags']:
+                    foreground_index += 8
+                color.append("38;5;" + str(foreground_index))
+            elif '1' in arg['flags']: # bright foreground
+                color.append("38;5;79")
+            else:
+                color.append("38;5;71")
+            return color
+
+    def color_params(self, color):
+        parameters = []
+        flags = color['flags']
+        for k in sorted(flags.keys()):
+            if flags[k]:
+                parameters.append(k)
+
+        if 'foreground' in color:
+            parameters.append(color['foreground'])
+
+
+        if 'background' in color:
+            parameters.append(color['background'])
+
+        # If there are no color settings, reset to defaults.
+        if not parameters:
+            parameters.append('0')
+        return parameters
+
 
     def shift_palette(self, args):
         """Shifts the palette colors according to the offset"""
@@ -145,7 +155,6 @@ class TerminalScreen(object):
     current_color =  {
         'flags': {}
     }
-    terminalcommands = TerminalCommands()
 
     def __init__(self, image_writer, origin = {'row': 1, 'col': 1}, dimensions = {'cols': 80}):
         """Set the screen parameters."""
@@ -260,7 +269,8 @@ class TerminalScreen(object):
         for parameter in arg:
             current = self.interpret_color(current, parameter)
         self.current_color = current
-        chars = self.image_writer.color(self.color_params(current))
+        self.logger.warn(self.current_color_debug())
+        chars = self.image_writer.color(current)
         return chars
 
 
@@ -290,38 +300,18 @@ class TerminalScreen(object):
                         current['flags']['6'] = False
         return current
 
-    def color_params(self, color):
-        parameters = []
-        flags = color['flags']
-        for k in sorted(flags.keys()):
-            if flags[k]:
-                parameters.append(k)
-
-        if 'foreground' in color:
-            parameters.append(color['foreground'])
-
-
-        if 'background' in color:
-            parameters.append(color['background'])
-
-        # If there are no color settings, reset to defaults.
-        if not parameters:
-            parameters.append('0')
-        return parameters
-
+    # TODO: this probably belongs to the output class.
     def newline(self):
         """Turn off colors when printing a newline.
 
         This ensures the background color won't run to end of line."""
 
-        default_color_params = self.color_params(self.default_color)
-        current_color_params = self.color_params(self.current_color)
-        default_color = self.terminalcommands.color(default_color_params)
-        current_color = self.terminalcommands.color(current_color_params)
+        default_color = self.image_writer.color(self.default_color)
+        current_color = self.image_writer.color(self.current_color)
 
         newline = "\n"
         if self.origin['col'] > 1:
-            newline += self.terminalcommands.forward().format(self.origin['col'] - 1)
+            newline += self.image_writer.forward().format(self.origin['col'] - 1)
 
 
         return default_color + newline + current_color
