@@ -46,12 +46,17 @@ def main():
 class DelayedPrinter(object):
     """Delay the printing to make it match the original display."""
 
-    def __init__(self, output=sys.stdout):
+    _delay = 0
+
+    def __init__(self, output=sys.stdout, delay=0):
         """Set the requested output destination for the instance."""
         self._output = output
+        if delay:
+            self._delay = delay
 
     def write(self, string):
         """Write a string to the screen."""
+        time.sleep(self._delay)
         self._output.write(string)
 
 class TerminalCommands(object):
