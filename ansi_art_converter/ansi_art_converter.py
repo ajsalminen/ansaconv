@@ -247,9 +247,17 @@ class TerminalScreen(object):
 
     def forward(self, cols):
         """Changes the tracked cursor position one column forward."""
-        self.cursor['col'] += cols[0]
-        if self.cursor['col'] > self.bounds['col']:
+        new_col = self.cursor['col'] + cols[0]
+        if new_col > self.bounds['col']:
+            offset = self.bounds['col'] - self.cursor['col']
             self.cursor['col'] = copy.deepcopy(self.bounds['col'])
+        else:
+            offset = cols[0]
+            self.cursor['col'] = new_col
+        command = self.image_writer.forward([offset])
+        self.logger.warn(command)
+        return command
+
 
     def back(self, cols):
         """Changes the tracked cursor position one column back."""
