@@ -289,10 +289,6 @@ class TerminalScreen(object):
         """The erase screen command has no effect on cursor position."""
         pass
 
-    def erase_line(self, arg):
-        """The erase line command has no effect on cursor position."""
-        pass
-
     def color(self, arg):
         """Sets the current tracked color as requested."""
         current = self.current_color
@@ -330,7 +326,7 @@ class TerminalScreen(object):
                         current['flags']['6'] = False
         return current
 
-    def erase_line(self):
+    def erase_line(self, args = []):
         return self.default_color_wrap(self.image_writer.erase_line())
 
     def newline(self):
