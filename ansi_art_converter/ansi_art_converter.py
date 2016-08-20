@@ -166,7 +166,9 @@ class TerminalScreen(object):
     auto_newline = False
     max_row = 1
     default_color = {
-        'flags': {}
+        'flags': {},
+        'background' : 40,
+        'foreground' : 30
     }
     current_color =  {
         'flags': {}
