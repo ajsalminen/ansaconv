@@ -114,7 +114,14 @@ class TerminalCommands(object):
         return [parameter + self.palette_offset if isinstance(parameter, int) and parameter >= 30 else parameter for parameter in args]
 
     def forward(self, args = [1]):
+        if args[0] == 0:
+            return ''
         return "\033[{}C".format(args[0])
+
+    def up(self, args = [1]):
+        if args[0] == 0:
+            return ''
+        return "\033[{}A".format(args[0])
 
     def hide_cursor(self, args = []):
         return "\033[?25l"
@@ -124,6 +131,10 @@ class TerminalCommands(object):
 
     def erase_screen(self, args = []):
         return "\033[2J"
+
+    def erase_line(self, args = []):
+        return "\033[2K"
+
 
     def cursor_position(self, row, column):
         return "\033[{};{}f".format(row, column)
@@ -183,6 +194,18 @@ class TerminalScreen(object):
         flags = ';'.join(self.current_color['flags'].keys())
         return "fg: {} bg: {} flags: {}".format(foreground, background, flags)
 
+    def clear_rows(self):
+        output = ''
+        num_rows = self.cursor['row'] - self.max_row
+        output +=  self.erase_line()
+
+        # If we need to erase more than one line.
+        if num_rows > 1:
+            for l in range(1, num_rows):
+                output += self.image_writer.up()
+                output +=  self.erase_line()
+            output += self.image_writer.cursor_position(self.cursor['row'], self.cursor['col'])
+        return output
 
     def printable_character(self, char):
         """Handles printable characters."""
@@ -305,8 +328,17 @@ class TerminalScreen(object):
                         current['flags']['6'] = False
         return current
 
-    # TODO: this probably belongs to the output class.
+    def erase_line(self):
+        return self.default_color_wrap(self.image_writer.erase_line())
+
     def newline(self):
+        newline = "\n"
+        if self.origin['col'] > 1:
+            newline += self.image_writer.forward().format(self.origin['col'] - 1)
+        return self.default_color_wrap(newline)
+
+    # TODO: this probably belongs to the output class.
+    def default_color_wrap(self, chars):
         """Turn off colors when printing a newline.
 
         This ensures the background color won't run to end of line."""
@@ -314,12 +346,8 @@ class TerminalScreen(object):
         default_color = self.image_writer.color(self.default_color)
         current_color = self.image_writer.color(self.current_color)
 
-        newline = "\n"
-        if self.origin['col'] > 1:
-            newline += self.image_writer.forward().format(self.origin['col'] - 1)
 
-
-        return default_color + newline + current_color
+        return default_color + chars + current_color
 
     def backspace(self):
         """Delete previous character and go back."""
@@ -451,8 +479,11 @@ class AnsiArtConverter(object):
                     if char_pos == 8:
                         self.screen.backspace()
                     return chars
+            output = ''
+            if self.screen.cursor['row'] > self.screen.max_row:
+                output += self.screen.clear_rows()
             chars = self.screen.printable_character(chars)
-            chars = chars.decode('cp437').encode('utf-8')
+            chars = output + chars.decode('cp437').encode('utf-8')
         self.logger.warn("row: {} col: {}".format(self.screen.cursor['row'],
                                                   self.screen.cursor['col']))
         col = self.screen.cursor['col']
