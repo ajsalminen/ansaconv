@@ -550,8 +550,8 @@ class AnsiArtConverter(object):
     def command(self, command_char, parameters, chars):
         replaced_parameters = getattr(self.screen, self.commands[command_char])(parameters)
 
-        if replaced_parameters:
-            # Screen needs to provide the complete color setting.
+        # We can either replace with a new one or remove something.
+        if replaced_parameters or replaced_parameters == '':
             chars = replaced_parameters
         return chars
 
