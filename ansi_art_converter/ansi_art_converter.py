@@ -212,13 +212,6 @@ class TerminalScreen(object):
 
         if self.cursor['row'] > self.max_row:
             self.max_row = self.cursor['row']
-
-        # Ignore a newline if it was already added because of width limit.
-        if self.auto_newline and char != "\r":
-            self.auto_newline = False
-            if char == "\n":
-                return ""
-
         if char == "\n":
             self.cursor['row'] += 1
             self.cursor['col'] = copy.deepcopy(self.origin['col'])
@@ -229,11 +222,10 @@ class TerminalScreen(object):
             return char
         else:
             self.cursor['col']+=1
-
             if self.cursor['col'] > self.bounds['col']:
+                self.logger.warn('Automatically inserting a newline.')
                 self.cursor['row'] += 1
                 self.cursor['col'] = copy.deepcopy(self.origin['col'])
-                self.auto_newline = True
                 return char + self.newline()
         return char
 
