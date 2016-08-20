@@ -454,7 +454,8 @@ class AnsiArtConverter(object):
     printable_control_chars = set(
         [
             10, # LF (\n)
-            13 # CR (\r)
+            13, # CR (\r)
+            22 # SYN, seen in avenge01/W7-TSL01.ANS.
         ]
     )
 
@@ -471,6 +472,9 @@ class AnsiArtConverter(object):
         if chars[0] == '\x1b':
             chars += stream.read(1)
             chars = self.process_escape_code(chars, stream)
+        if chars[0] == '\x16': # TODO: move this to a more appropriate place.
+            chars = '▬'
+            self.screen.cursor['col'] += 1
         else:
             char_pos = ord(chars[0])
             if 0 <= char_pos <= 31 or char_pos == 127:
