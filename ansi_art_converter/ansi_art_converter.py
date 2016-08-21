@@ -445,15 +445,66 @@ class AnsiArtConverter(object):
         ]
     )
 
-    # Currently these are passed to and handled in printable_character.
-    # Most control characters don't affect cursor position so just pass them.
-    printable_control_chars = set(
+    # These are the only things not passed to and handled in printable_character.
+    # Besides ESC of course.
+    nonprintable_control_chars = set(
         [
-            10, # LF (\n)
-            13, # CR (\r)
-            22 # SYN, seen in avenge01/W7-TSL01.ANS.
+             7, # BEL
+             8  # BS
         ]
     )
+
+    # These are control characters that are mapped to unicode characters as
+    # they are part of the extended set used in cp437 and have a graphical
+    # representation. The choices are based on the ibmgraph mapping by the
+    # Unicode consortium except for using left/right triangle instead of pointer.
+    # Excluded ones that do have a graphical representation but not usable in
+    # ANSI art are: BS, BEL, ESC, CR, LF
+    printable_control_char_mapping = {
+        0x15: 0x00a7, #	SECTION SIGN
+        0x14: 0x00b6, #	PILCROW SIGN
+        # 0x07: 0x2022, # BULLET / BEL
+        0x13: 0x203c, #	DOUBLE EXCLAMATION MARK
+        # 0x1b: 0x2190, # LEFTWARDS ARROW / ESC
+        0x18: 0x2191, #	UPWARDS ARROW
+        0x1a: 0x2192, #	RIGHTWARDS ARROW
+        0x19: 0x2193, #	DOWNWARDS ARROW
+        0x1d: 0x2194, #	LEFT RIGHT ARROW
+        0x12: 0x2195, #	UP DOWN ARROW
+        0x17: 0x21a8, #	UP DOWN ARROW WITH BASE
+        0x1c: 0x221f, #	RIGHT ANGLE
+        0x7f: 0x2302, #	HOUSE
+        0xcd: 0x2550, #	BOX DRAWINGS DOUBLE HORIZONTAL
+        0xba: 0x2551, #	BOX DRAWINGS DOUBLE VERTICAL
+        0xc9: 0x2554, #	BOX DRAWINGS DOUBLE DOWN AND RIGHT
+        0xbb: 0x2557, #	BOW DRAWINGS DOUBLE DOWN AND LEFT
+        0xc8: 0x255a, #	BOX DRAWINGS DOUBLE UP AND RIGHT
+        0xbc: 0x255d, #	BOX DRAWINGS DOUBLE UP AND LEFT
+        0xcc: 0x2560, #	BOX DRAWINGS DOUBLE VERTICAL AND RIGHT
+        0xb9: 0x2563, #	BOX DRAWINGS DOUBLE VERTICAL AND LEFT
+        0xcb: 0x2566, #	BOX DRAWINGS DOUBLE DOWN AND HORIZONTAL
+        0xca: 0x2569, #	BOX DRAWINGS DOUBLE UP AND HORIZONTAL
+        0xce: 0x256c, #	BOX DRAWINGS DOUBLE VERTICAL AND HORIZONTAL
+        0x16: 0x25ac, #	BLACK RECTANGLE
+        0x1e: 0x25b2, #	BLACK UP-POINTING TRIANGLE
+        0x10: 0x25b6, #	BLACK RIGHT-POINTING TRIANGLE
+        0x1f: 0x25bc, #	BLACK DOWN-POINTING TRIANGLE
+        0x11: 0x25c0, #	BLACK LEFT-POINTING TRIANGLE
+        0x09: 0x25cb, #	WHITE CIRCLE
+        # 0x08: 0x25d8, # INVERSE BULLET / BS
+        # 0x0a: 0x25d9, # INVERSE WHITE CIRCLE / LF
+        0x01: 0x263a, #	WHITE SMILING FACE
+        0x02: 0x263b, #	BLACK SMILING FACE
+        0x0f: 0x263c, #	WHITE SUN WITH RAYS
+        0x0c: 0x2640, #	FEMALE SIGN
+        0x0b: 0x2642, #	MALE SIGN
+        0x06: 0x2660, #	BLACK SPADE SUIT
+        0x05: 0x2663, #	BLACK CLUB SUIT
+        0x03: 0x2665, #	BLACK HEART SUIT
+        0x04: 0x2666, #	BLACK DIAMOND SUIT
+        # 0x0d: 0x266a, # EIGHTH NOTE / CR
+        0x0e: 0x266b  #	BEAMED EIGHTH NOTES
+    }
 
     def __init__(self, source_ansi, output, screen, image_writer, palette_offset = 0):
         """Sets the source and destination for the conversion."""
@@ -465,18 +516,18 @@ class AnsiArtConverter(object):
 
     def process(self, chars, stream):
         """Processes characters that are part of the ANSI art."""
-        if chars[0] == '\x1b':
+        if ord(chars[0]) in self.printable_control_char_mapping: # TODO: move this to a more appropriate place.
+            chars = unichr(self.printable_control_char_mapping[ord(chars[0])])
+            self.screen.cursor['col'] += 1
+        elif chars[0] == '\x1b':
             chars += stream.read(1)
             chars = self.process_escape_code(chars, stream)
-        if chars[0] == '\x16': # TODO: move this to a more appropriate place.
-            chars = '▬'
-            self.screen.cursor['col'] += 1
         else:
             char_pos = ord(chars[0])
             if 0 <= char_pos <= 31 or char_pos == 127:
                 # Nonprintable control characters.
                 self.logger.warn("ASCII control code: {}".format(hex(char_pos)))
-                if char_pos not in self.printable_control_chars:
+                if char_pos in self.nonprintable_control_chars:
                     # del, horizontal tab, vertical tab (others?) not handled.
                     if char_pos == 8:
                         self.screen.backspace()
