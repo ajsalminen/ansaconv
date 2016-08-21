@@ -29,6 +29,8 @@ def main():
                         default=1, help='Row offset to print the art at.')
     parser.add_argument('-p', '--palette-offset', type=int,
                         default=64, help='Palette offset to use.')
+    parser.add_argument('-d', '--delay', type=float,
+                        default=0, help='Delay between printing each character.')
 
     args = parser.parse_args()
 
@@ -39,7 +41,8 @@ def main():
     logger.warn("converting from: {}".format(args.infile.name))
     image_writer = TerminalCommands(args.palette_offset)
     screen = TerminalScreen(image_writer, {'row': args.offset_row, 'col': args.offset_column})
-    converter = AnsiArtConverter(args.infile, args.outfile, screen, image_writer, args.palette_offset)
+    converter = AnsiArtConverter(args.infile, args.outfile, screen, image_writer,
+                                 args.palette_offset, args.delay)
     converter.print_ansi()
 
 
@@ -506,10 +509,10 @@ class AnsiArtConverter(object):
         0x0e: 0x266b  #	BEAMED EIGHTH NOTES
     }
 
-    def __init__(self, source_ansi, output, screen, image_writer, palette_offset = 0):
+    def __init__(self, source_ansi, output, screen, image_writer, palette_offset = 0, delay = 0):
         """Sets the source and destination for the conversion."""
         self._source_ansi = source_ansi
-        self._output = DelayedPrinter(output)
+        self._output = DelayedPrinter(output, delay)
         self.position_reporter = PositionReporter(self)
         self.terminalcommands = image_writer
         self.screen = screen
